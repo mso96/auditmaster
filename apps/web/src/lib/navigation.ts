@@ -21,7 +21,7 @@ export const navItems: NavItem[] = [
     href: "/denetimler",
     icon: ClipboardList,
     description:
-      "Planlanan ve devam eden denetim çalışmaları burada listelenecek. Bu ekran henüz kayıt tutmuyor.",
+      "Kaydedilen denetimler ve bunlara bağlı risk kontrol matrisleri burada listelenir.",
     points: [
       "Denetim, birim, dönem ve durum alanları",
       "Çalışma kağıtlarına geçiş",
@@ -33,7 +33,7 @@ export const navItems: NavItem[] = [
     href: "/rcm",
     icon: ShieldCheck,
     description:
-      "Geçmiş denetim raporları, bulgular, şirket prosedürleri ve denetim standartlarından risk, ilişkili kontroller ve önerilen denetim testleri üretilecek. Her satır kaynak gösterimi taşıyacak.",
+      "Kapsam yazıldığında kütüphanedeki pasajlar bulunur; risk, kontrol ve test önerileri kaynaklarıyla üretilir. Kabul, düzeltme ve ret kararı denetçiye aittir.",
     points: [
       "Kapsama alınacak belgelerin seçimi",
       "Risk, kontrol ve test önerileri",
@@ -69,7 +69,7 @@ export const navItems: NavItem[] = [
     href: "/dokuman-kutuphanesi",
     icon: Library,
     description:
-      "Denetim raporları, prosedürler ve standartlar burada toplanacak. RCM üretimi bu belgelerdeki pasajlara dayanacak.",
+      "Denetim raporları, bulgular, prosedürler, standartlar ve iyi uygulamalar burada tutulur. Metin parçalanır; RCM önerileri bu parçalara dayanır.",
     points: [
       "Belge yükleme ve sınıflandırma",
       "Kaynak olarak kullanılacak pasajların işaretlenmesi",

@@ -1,0 +1,7 @@
+ÖRNEK BELGE — Geçmiş denetim bulgusu (2024)
+
+Bu dosya AuditMaster test fikstürüdür. Gerçek kurum verisi değildir.
+
+Bulgu: rekabetçi teklif alınmadan yapılan alımlar.
+Satın alma birimi, 2024 yılında 14 siparişte üç teklif kuralını uygulamamıştır. Tek tedarikçiye doğrudan sipariş verilmiştir.
+Öneri: teklif zorunluluğu sistemde kontrol edilmeden sipariş onaylanmamalıdır.

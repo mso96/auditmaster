@@ -1,4 +1,5 @@
 from functools import lru_cache
+from typing import Literal
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -20,6 +21,17 @@ class Settings(BaseSettings):
     openai_base_url: str = "http://localhost:11434/v1"
     openai_api_key: str = ""
     openai_model: str = "local-model"
+    # FAKE_MODELS=true serves deterministic chat JSON and hashed embeddings.
+    # The OpenAI-compatible endpoint is not called. Use this for compose, CI,
+    # and any machine that does not have a model server yet.
+    fake_models: bool = False
+    embedding_mode: Literal["openai", "local"] = "openai"
+    embedding_base_url: str = ""
+    embedding_api_key: str = ""
+    embedding_model: str = "BAAI/bge-m3"
+    # Optional self-hosted reranker, Hugging Face TEI /rerank shape:
+    # POST {"query", "texts"} -> [{"index", "score"}].
+    reranker_url: str = ""
     database_url: str = (
         "postgresql://auditmaster:auditmaster@localhost:5432/auditmaster"
     )
