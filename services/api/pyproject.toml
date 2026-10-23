@@ -1,0 +1,38 @@
+[project]
+name = "auditmaster-api"
+version = "0.1.0"
+description = "AuditMaster API. RAG and tabular analysis will live here."
+requires-python = ">=3.12"
+dependencies = [
+  "fastapi>=0.115",
+  "openai>=1.55",
+  "psycopg[binary]>=3.2",
+  "pydantic-settings>=2.6",
+  "uvicorn[standard]>=0.32",
+]
+
+[project.optional-dependencies]
+dev = [
+  "httpx>=0.27",
+  "pytest>=8.3",
+  "ruff>=0.8",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+src = ["app", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
