@@ -36,6 +36,7 @@ class Settings(BaseSettings):
         "postgresql://auditmaster:auditmaster@localhost:5432/auditmaster"
     )
     data_dir: str = "./data"
+    analytics_holidays_path: str | None = None
     cors_origins: str = "http://localhost:3000"
 
     @property

@@ -8,6 +8,7 @@ dependencies = [
   "pandas>=2.2",
   "openpyxl>=3.1",
   "python-multipart>=0.0.20",
+  "duckdb>=1.1",
   "openai>=1.55",
   "psycopg[binary]>=3.2",
   "pydantic-settings>=2.6",
@@ -44,3 +45,6 @@ src = ["app", "tests"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP"]
+
+[tool.setuptools.package-data]
+"app.analytics" = ["*.json"]
