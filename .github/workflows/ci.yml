@@ -51,6 +51,7 @@ jobs:
           --health-retries 20
     env:
       DATABASE_URL: postgresql://auditmaster:auditmaster@localhost:5432/auditmaster
+      TEST_DATABASE_URL: postgresql://auditmaster:auditmaster@localhost:5432/auditmaster
       REQUIRE_DATABASE: "1"
       FAKE_MODELS: "true"
     steps:

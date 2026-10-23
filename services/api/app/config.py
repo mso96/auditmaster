@@ -35,6 +35,7 @@ class Settings(BaseSettings):
     database_url: str = (
         "postgresql://auditmaster:auditmaster@localhost:5432/auditmaster"
     )
+    data_dir: str = "./data"
     cors_origins: str = "http://localhost:3000"
 
     @property

@@ -206,3 +206,46 @@ API tests that talk to Postgres skip unless `DATABASE_URL` is set. CI sets `DATA
 2. Excel/CSV upload and a DuckDB/pandas check for duplicate payments, with the query and source file shown beside the result.
 3. Authentication and an audit trail of what the model proposed and what the auditor accepted.
 4. A Docling parser behind `parse_document` for scanned PDFs, kept optional so the default image stays small.
+
+## Veri Analizi: yerel CSV / Excel yükleme
+
+`docker compose up --build` starts the upload flow at
+`http://localhost:3000/veri-analizi`. Choose/drop a CSV or XLSX, optionally enter
+an Excel sheet name (blank selects the first sheet), then select **Yükle ve incele**.
+The dataset list, first 100 source rows, and column profiles appear on the page.
+
+- `POST /datasets`: multipart `file` and optional `sheet` (exact worksheet name).
+  Maximum file size: 50 MiB. UTF-8 (including BOM) and Windows-1254 CSV are detected
+  locally; supported separators are semicolon, comma, tab, and pipe.
+- `GET /datasets`: metadata (`id`, `name`, `sheet`, `row_count`, `created_at`).
+- `GET /datasets/{id}/preview`: `{columns, rows}` (at most 100 rows).
+- `GET /datasets/{id}/profile`: `{row_count, columns}`; each column has `name`,
+  `type`, `null_count`, `distinct_count`, `min`, `max`, and `top_values`.
+- `DATA_DIR` configures host API storage (default `./data`). Compose mounts the
+  persistent `dataset_files` volume at `/data`; metadata lives in Postgres.
+  Back up both volumes together. The metadata table is initialized idempotently,
+  including on existing Postgres volumes; no reset is needed.
+
+Profiling checks all nonblank values. A column is boolean, number, or date only
+when every nonblank value parses; otherwise it remains text. Booleans recognize
+true/false and Evet/Hayır. Numbers accept Turkish `1.234,56`, decimal commas, and
+ordinary decimal points; ambiguous `1.234` means Turkish thousands (1234).
+Dates accept `dd.MM.yyyy`, ISO `yyyy-MM-dd`, and native Excel dates. Blank cells
+are null, excluded from distinct counts; empty columns are text. Distinct counts
+use inferred normalized values. Text top-five ties follow first appearance.
+Preview preserves source values (Excel dates use ISO text), including leading
+zeros. Empty lines are ignored. Duplicate/blank headers and malformed row widths
+are rejected rather than silently renamed or truncated. Excel uses cached formula
+values; formulas and macros are never executed. Expanded XLSX content is limited
+to 256 MiB. Upload failures remove partial files and do not register a dataset.
+
+The feature makes no cloud or LLM calls. IBM Plex fonts are bundled locally, so
+web builds do not fetch Google Fonts. For air-gapped deployment, prebuild/export
+the Docker images or mirror build dependencies before transfer.
+
+API checks: `cd services/api && pip install -e '.[dev]' && ruff check . && pytest`.
+Set `TEST_DATABASE_URL` to a disposable Postgres database to include the real
+persistence integration test; CI supplies a pgvector/Postgres service and runs it.
+Tiny UTF-8, Windows-1254, comma CSV and multi-sheet XLSX fixtures are committed in
+`services/api/tests/fixtures`. Web checks: `cd apps/web && npm ci && npm run lint &&
+npm run typecheck && npm run build`.
