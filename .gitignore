@@ -14,3 +14,5 @@ venv/
 
 .DS_Store
 *.tsbuildinfo
+
+services/api/data/

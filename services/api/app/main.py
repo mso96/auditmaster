@@ -4,6 +4,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
+from app.datasets.router import router as datasets_router
 from app.db import check_database
 from app.llm import LLMClient
 
@@ -13,6 +14,7 @@ logger = logging.getLogger(__name__)
 def create_app() -> FastAPI:
     settings = get_settings()
     app = FastAPI(title="AuditMaster API", version="0.1.0")
+    app.include_router(datasets_router)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origin_list,
