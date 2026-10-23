@@ -19,6 +19,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
   "httpx>=0.27",
+  "duckdb>=1.1",
   "pytest>=8.3",
   "ruff>=0.8",
 ]
@@ -44,3 +45,6 @@ src = ["app", "tests"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP"]
+
+[tool.setuptools.package-data]
+"app.analytics" = ["*.json"]
