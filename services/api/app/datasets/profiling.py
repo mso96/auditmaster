@@ -149,12 +149,8 @@ def prepare_table(frame: pd.DataFrame):
                 "distinct_count": len(counts),
                 # JSON clients expect numeric min/max; distinct counts and typed handoff
                 # are computed with exact Decimal values, never rounded binary floats.
-                "min": float(minimum)
-                if kind == "number" and minimum is not None
-                else scalar(minimum),
-                "max": float(maximum)
-                if kind == "number" and maximum is not None
-                else scalar(maximum),
+                "min": json_number(minimum) if kind == "number" else scalar(minimum),
+                "max": json_number(maximum) if kind == "number" else scalar(maximum),
                 "top_values": [{"value": v, "count": c} for v, c in counts.most_common(5)]
                 if kind == "text"
                 else [],
