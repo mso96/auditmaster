@@ -1,13 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { apiBaseUrl } from "@/lib/api";
 
 type Status = "checking" | "ok" | "down";
-
-function apiBaseUrl(): string {
-  const configured = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
-  return configured.replace(/\/$/, "");
-}
 
 const label: Record<Status, string> = {
   checking: "API kontrol ediliyor",

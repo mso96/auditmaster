@@ -5,11 +5,14 @@ from app.config import Settings
 from app.llm import LLMClient
 
 
-def _settings(**overrides: str) -> Settings:
-    values = {
+def _settings(**overrides: object) -> Settings:
+    values: dict[str, object] = {
         "openai_base_url": "http://llm.internal/v1",
         "openai_api_key": "secret",
         "openai_model": "qwen2.5",
+        "fake_models": False,
+        "embedding_mode": "openai",
+        "embedding_model": "BAAI/bge-m3",
     }
     values.update(overrides)
     return Settings(**values)
@@ -52,7 +55,7 @@ def test_complete_points_sdk_at_configured_base_url(monkeypatch) -> None:
     created: dict[str, str] = {}
 
     class FakeOpenAI:
-        def __init__(self, *, base_url: str, api_key: str) -> None:
+        def __init__(self, *, base_url: str, api_key: str, **_kwargs: object) -> None:
             created["base_url"] = base_url
             created["api_key"] = api_key
             self.chat = MagicMock()
@@ -68,3 +71,19 @@ def test_complete_points_sdk_at_configured_base_url(monkeypatch) -> None:
         "base_url": "http://llm.internal/v1",
         "api_key": "not-set",
     }
+
+
+def test_json_mode_retries_without_response_format() -> None:
+    fake = MagicMock()
+    fake.chat.completions.create.side_effect = [
+        RuntimeError("response_format is unsupported"),
+        SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content="{}"))]),
+    ]
+    client = LLMClient(settings=_settings(), client=fake)
+
+    assert client.complete("json ver", json_mode=True) == "{}"
+    assert fake.chat.completions.create.call_count == 2
+    first = fake.chat.completions.create.call_args_list[0].kwargs
+    second = fake.chat.completions.create.call_args_list[1].kwargs
+    assert first["response_format"] == {"type": "json_object"}
+    assert "response_format" not in second

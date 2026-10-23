@@ -24,9 +24,15 @@ services:
       context: ./services/api
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-auditmaster}:${POSTGRES_PASSWORD:-auditmaster}@db:5432/${POSTGRES_DB:-auditmaster}
+      FAKE_MODELS: ${FAKE_MODELS:-true}
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-http://localhost:11434/v1}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-local-dev}
       OPENAI_MODEL: ${OPENAI_MODEL:-local-model}
+      EMBEDDING_MODE: ${EMBEDDING_MODE:-openai}
+      EMBEDDING_BASE_URL: ${EMBEDDING_BASE_URL:-}
+      EMBEDDING_API_KEY: ${EMBEDDING_API_KEY:-}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-BAAI/bge-m3}
+      RERANKER_URL: ${RERANKER_URL:-}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
     ports:
       - "8000:8000"
