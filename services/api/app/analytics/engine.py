@@ -8,10 +8,11 @@ from pathlib import Path
 
 import pandas as pd
 
+from app.tabular.parsing import parse_amounts, parse_dates, text
+
 from .fuzzy import clusters
 from .models import MAPPING_KEYS, RULE_IDS, AnalysisResult, Finding, RulesConfig, Summary
-from .parsing import amount as parse_amount
-from .parsing import dates, invoice, same_identity, text
+from .parsing import invoice, same_identity
 
 
 def run_rules(df, mapping: dict[str, str], config=None) -> AnalysisResult:
@@ -43,23 +44,24 @@ def run_rules(df, mapping: dict[str, str], config=None) -> AnalysisResult:
     findings, skipped, warnings = [], {}, []
     omitted = Counter()
     parsed_dates = (
-        dates(df[mapping[cfg.posting_date_field]], cfg, warnings)
+        parse_dates(
+            df[mapping[cfg.posting_date_field]],
+            date_format=cfg.date_format,
+            dayfirst=cfg.dayfirst,
+            field=cfg.posting_date_field,
+            warnings=warnings,
+        )
         if cfg.posting_date_field in mapping
         else [None] * n
     )
     vendor = "vendor_id" if "vendor_id" in mapping else "vendor_name"
-    ambiguous_amounts, invalid_amounts, blank_currencies = [], [], []
+    parsed_amounts = parse_amounts(
+        values.get("amount", [None] * n), decimal_separator=cfg.decimal_separator, warnings=warnings
+    )
+    blank_currencies = []
     for i, r in enumerate(rows):
         r["vendor"] = r.get(vendor)
-        raw_amount = r.get("amount")
-        r["money"] = parse_amount(raw_amount, cfg.decimal_separator)
-        if text(raw_amount) is not None and r["money"] is None:
-            invalid_amounts.append(i)
-        separator = re.escape(cfg.decimal_separator)
-        if isinstance(raw_amount, str) and re.fullmatch(
-            rf"[+-]?\d{{1,3}}(?:{separator}\d{{3}})+", raw_amount.strip()
-        ):
-            ambiguous_amounts.append(i)
+        r["money"] = parsed_amounts[i]
         currency = r.get("currency")
         if "currency" in mapping and currency is None:
             blank_currencies.append(i)
@@ -68,13 +70,6 @@ def run_rules(df, mapping: dict[str, str], config=None) -> AnalysisResult:
             r["currency_key"] = "UNSPECIFIED"
         r["normalized_invoice"] = invoice(r.get("invoice_no"))
         r["date"] = parsed_dates[i]
-    if invalid_amounts:
-        warnings.append(f"amount: geçersiz değer içeren satırlar {invalid_amounts}.")
-    if ambiguous_amounts:
-        warnings.append(
-            f"Belirsiz binlik ayırıcı içeren satırlar {ambiguous_amounts}; "
-            f"decimal_separator={cfg.decimal_separator} uygulandı."
-        )
     if blank_currencies:
         warnings.append(
             f"Boş para birimi içeren satırlar {blank_currencies}; "

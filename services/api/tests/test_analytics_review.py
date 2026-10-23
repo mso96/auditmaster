@@ -355,3 +355,18 @@ def test_api_accepts_limits_and_preserves_numeric_types():
 def test_zero_dispersion_tolerance_boundary_is_exact():
     rows = [{"vendor_id": "A", "amount": a} for a in [100] * 20 + [90, 110, 110.01]]
     assert matches(run(rows), "vendor_outlier") == [[22]]
+
+
+def test_mixed_offsets_keep_local_posting_day():
+    rows = [
+        {"payment_date": value}
+        for value in ["2026-06-07T00:30:00+03:00", "2026-06-07T23:30:00-04:00"]
+    ]
+    assert matches(run(rows), "non_working_day") == [[0], [1]]
+
+
+def test_shared_parser_accepts_decimal_without_integer_part():
+    result = run(
+        [{"vendor_id": "A", "invoice_no": "X", "amount": amount} for amount in [".5", 0.5]]
+    )
+    assert matches(result, "exact_duplicate") == [[0, 1]]

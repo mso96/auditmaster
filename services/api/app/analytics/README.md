@@ -142,3 +142,8 @@ From `services/api`: `python -m pytest`. The suite includes all eight planted ru
 locale/typed regressions, segment collisions, a brute-force fuzzy-cluster oracle,
 a dense 10,000-row case, truncation, currencies, log outliers, Turkish identities,
 calendar years, custom calendars, request limits, DuckDB parity and offline execution.
+
+Both ingestion and analytics now call `app/tabular/parsing.py`; there is no second
+Turkish date/amount parser. Ingestion can infer a column locale (`auto`); analytics
+uses the explicit configured fallback for text and treats typed columns as final.
+Mixed timezone timestamps are evaluated by local posting date without UTC shifting.
