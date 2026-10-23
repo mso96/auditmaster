@@ -53,7 +53,7 @@ def test_planted_matches_and_determinism(payments):
     result = run_rules(frame, mapping)
     expected = {
         "exact_duplicate": [[0, 1]],
-        "fuzzy_duplicate": [[0, 2], [1, 2], [4, 5]],
+        "fuzzy_duplicate": [[0, 1, 2], [4, 5]],
         "shared_iban": [[0, 1, 4]],
         "amount_pattern": [[7], [8]],
         "non_working_day": [[7], [8]],
@@ -63,7 +63,7 @@ def test_planted_matches_and_determinism(payments):
     }
     assert {rule: matches(result, rule) for rule in expected} == expected
     assert result.summary.by_rule == {k: len(v) for k, v in expected.items()}
-    assert result.summary.total_findings == 10
+    assert result.summary.total_findings == 9
     assert result.summary.affected_rows == 7
     assert result.findings[0].row_ids == ["id-0", "id-1"]
     assert result == run_rules(frame, mapping)
@@ -141,7 +141,7 @@ def test_holidays_and_half_days():
         [4],
         [5],
     ]
-    assert any("2027" in w for w in run([{"payment_date": "2027-06-01"}]).summary.warnings)
+    assert any("2028" in w for w in run([{"payment_date": "2028-06-01"}]).summary.warnings)
 
 
 def test_nulls_invalid_and_missing_mapping():
@@ -171,12 +171,12 @@ def test_fuzzy_window_and_normalization():
         dict(vendor_name="A", amount=19, invoice_no=inv, payment_date=d)
         for inv, d in [
             ("0001", "2026-06-01"),
-            ("0-01", "2026-08-01"),
+            ("001", "2026-08-01"),
             ("X", "2026-06-04"),
             ("Y", "2026-06-08"),
         ]
     ]
-    assert matches(run(rows), "fuzzy_duplicate") == [[0, 1], [0, 2]]
+    assert matches(run(rows), "fuzzy_duplicate") == [[0, 1, 2]]
     assert matches(run(rows, fuzzy_days=0), "fuzzy_duplicate") == [[0, 1]]
 
 

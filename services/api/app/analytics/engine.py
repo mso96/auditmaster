@@ -2,35 +2,16 @@ import json
 import math
 import re
 from collections import Counter, defaultdict
-from decimal import Decimal, InvalidOperation
 from fractions import Fraction
 from importlib.resources import files
-from itertools import combinations
+from pathlib import Path
 
 import pandas as pd
 
-from .models import RULE_IDS, AnalysisResult, Finding, RulesConfig, Summary
-
-
-def _text(value):
-    if value is None or pd.isna(value):
-        return None
-    return str(value).strip() or None
-
-
-def _amount(value):
-    try:
-        result = Decimal(str(value))
-        return result if result.is_finite() else None
-    except (InvalidOperation, ValueError):
-        return None
-
-
-def _invoice(value):
-    if not value:
-        return None
-    value = "".join(c for c in value if c.isalnum())
-    return re.sub(r"\d+", lambda m: m.group().lstrip("0") or "0", value) or None
+from .fuzzy import clusters
+from .models import MAPPING_KEYS, RULE_IDS, AnalysisResult, Finding, RulesConfig, Summary
+from .parsing import amount as parse_amount
+from .parsing import dates, invoice, same_identity, text
 
 
 def run_rules(df, mapping: dict[str, str], config=None) -> AnalysisResult:
@@ -41,6 +22,9 @@ def run_rules(df, mapping: dict[str, str], config=None) -> AnalysisResult:
     from dependent comparisons and reported in warnings.
     """
     cfg = config if isinstance(config, RulesConfig) else RulesConfig.model_validate(config or {})
+    unknown = sorted(set(mapping) - MAPPING_KEYS)
+    if unknown:
+        raise ValueError(f"Bilinmeyen eşleme anahtarları: {unknown}")
     if not isinstance(df, pd.DataFrame):
         df = df.df()
     if not df.columns.is_unique:
@@ -49,28 +33,57 @@ def run_rules(df, mapping: dict[str, str], config=None) -> AnalysisResult:
     if missing:
         raise ValueError(f"Eşlenen sütunlar bulunamadı: {missing}")
     n = len(df)
-    values = {key: [_text(v) for v in df[col]] for key, col in mapping.items()}
+    typed_fields = {"amount", "invoice_date", "payment_date"}
+    values = {
+        key: (df[col].tolist() if key in typed_fields else [text(v) for v in df[col]])
+        for key, col in mapping.items()
+    }
     rows = [{key: vals[i] for key, vals in values.items()} for i in range(n)]
     ids = values.get("row_id", [str(v) for v in df.index])
     findings, skipped, warnings = [], {}, []
+    omitted = Counter()
+    parsed_dates = (
+        dates(df[mapping[cfg.posting_date_field]], cfg, warnings)
+        if cfg.posting_date_field in mapping
+        else [None] * n
+    )
     vendor = "vendor_id" if "vendor_id" in mapping else "vendor_name"
-    for r in rows:
+    ambiguous_amounts, invalid_amounts, blank_currencies = [], [], []
+    for i, r in enumerate(rows):
         r["vendor"] = r.get(vendor)
-        r["money"] = _amount(r.get("amount"))
-        r["currency_key"] = r.get("currency") if "currency" in mapping else "UNSPECIFIED"
-        r["normalized_invoice"] = _invoice(r.get("invoice_no"))
-        raw_date = r.get(cfg.posting_date_field)
-        try:
-            parsed_date = pd.Timestamp(raw_date) if raw_date else None
-            r["date"] = (
-                parsed_date.date() if parsed_date is not None and not pd.isna(parsed_date) else None
+        raw_amount = r.get("amount")
+        r["money"] = parse_amount(raw_amount, cfg.decimal_separator)
+        if text(raw_amount) is not None and r["money"] is None:
+            invalid_amounts.append(i)
+        separator = re.escape(cfg.decimal_separator)
+        if isinstance(raw_amount, str) and re.fullmatch(
+            rf"[+-]?\d{{1,3}}(?:{separator}\d{{3}})+", raw_amount.strip()
+        ):
+            ambiguous_amounts.append(i)
+        currency = r.get("currency")
+        if "currency" in mapping and currency is None:
+            blank_currencies.append(i)
+        r["currency_key"] = currency.upper() if currency else cfg.default_currency
+        if "currency" not in mapping and r["currency_key"] is None:
+            r["currency_key"] = "UNSPECIFIED"
+        r["normalized_invoice"] = invoice(r.get("invoice_no"))
+        r["date"] = parsed_dates[i]
+    if invalid_amounts:
+        warnings.append(f"amount: geçersiz değer içeren satırlar {invalid_amounts}.")
+    if ambiguous_amounts:
+        warnings.append(
+            f"Belirsiz binlik ayırıcı içeren satırlar {ambiguous_amounts}; "
+            f"decimal_separator={cfg.decimal_separator} uygulandı."
+        )
+    if blank_currencies:
+        warnings.append(
+            f"Boş para birimi içeren satırlar {blank_currencies}; "
+            + (
+                f"{cfg.default_currency} varsayıldı."
+                if cfg.default_currency
+                else "para birimine bağlı kurallardan çıkarıldı."
             )
-        except (ValueError, TypeError, OverflowError):
-            r["date"] = None
-    for field, parsed in [("amount", "money"), (cfg.posting_date_field, "date")]:
-        bad = [i for i, r in enumerate(rows) if r.get(field) and r[parsed] is None]
-        if bad:
-            warnings.append(f"{field}: geçersiz değer içeren satırlar {bad}.")
+        )
     if "currency" not in mapping:
         warnings.append("Para birimi eşlenmedi; tüm tutarlar aynı para biriminde varsayıldı.")
 
@@ -81,6 +94,9 @@ def run_rules(df, mapping: dict[str, str], config=None) -> AnalysisResult:
         return not absent
 
     def add(rule, title, severity, explanation, positions, **evidence):
+        if len(findings) >= cfg.max_findings:
+            omitted[rule] += 1
+            return
         findings.append(
             Finding(
                 rule_id=rule,
@@ -117,35 +133,22 @@ def run_rules(df, mapping: dict[str, str], config=None) -> AnalysisResult:
                 )
 
     if ready("fuzzy_duplicate", vendor, "amount"):
-        for _, positions in groups("vendor", "money", "currency_key").items():
-            for a, b in combinations(positions, 2):
-                left, right = rows[a], rows[b]
-                if left.get("invoice_no") and left.get("invoice_no") == right.get("invoice_no"):
-                    continue  # Already represented by the exact rule.
-                normalized = (
-                    left["normalized_invoice"] is not None
-                    and left["normalized_invoice"] == right["normalized_invoice"]
+        for key, positions in groups("vendor", "money", "currency_key").items():
+            for members in clusters(rows, positions, cfg.fuzzy_days):
+                add(
+                    "fuzzy_duplicate",
+                    "Olası mükerrer ödeme",
+                    "medium",
+                    "Aynı tedarikçi, tutar ve para birimi; normalleştirilmiş fatura "
+                    f"veya en fazla {cfg.fuzzy_days} günlük tarih bağlantılarıyla oluşan küme. "
+                    "Kümenin uç tarihleri bu sınırı aşabilir.",
+                    members,
+                    vendor=key[0],
+                    amount=str(key[1]),
+                    currency=key[2],
+                    fuzzy_days=cfg.fuzzy_days,
+                    cluster_size=len(members),
                 )
-                days = (
-                    abs((left["date"] - right["date"]).days)
-                    if left["date"] and right["date"]
-                    else None
-                )
-                if normalized or (days is not None and days <= cfg.fuzzy_days):
-                    add(
-                        "fuzzy_duplicate",
-                        "Olası mükerrer ödeme",
-                        "medium",
-                        "Aynı tedarikçi, tutar ve para birimi; "
-                        + (
-                            "fatura numaraları normalleştirilince aynı."
-                            if normalized
-                            else f"Tarih farkı {days} gün (sınır {cfg.fuzzy_days})."
-                        ),
-                        [a, b],
-                        normalized_invoice_match=normalized,
-                        days_apart=days,
-                    )
 
     if ready("shared_iban", vendor, "iban"):
         for r in rows:
@@ -165,26 +168,60 @@ def run_rules(df, mapping: dict[str, str], config=None) -> AnalysisResult:
                 )
 
     if ready("amount_pattern", "amount"):
+        missing_limits = set()
         for i, r in enumerate(rows):
-            amount = r["money"]
-            if amount is None or amount <= 0:
+            amount, currency = r["money"], r["currency_key"]
+            if amount is None or amount <= 0 or currency is None:
                 continue
-            round_amount = Fraction(amount) % Fraction(cfg.round_unit) == 0
-            near = cfg.approval_threshold - cfg.threshold_margin <= amount < cfg.approval_threshold
+            threshold = (
+                cfg.approval_threshold.get(currency)
+                if isinstance(cfg.approval_threshold, dict)
+                else cfg.approval_threshold
+            )
+            unit = (
+                cfg.round_unit.get(currency) if isinstance(cfg.round_unit, dict) else cfg.round_unit
+            )
+            if threshold is None or unit is None:
+                missing_limits.add(currency)
+                continue
+            round_amount = Fraction(amount) % Fraction(unit) == 0
+            near = threshold - cfg.threshold_margin <= amount < threshold
             if round_amount or near:
                 add(
                     "amount_pattern",
                     "Yuvarlak veya onay sınırına yakın tutar",
                     "low",
-                    f"Tutar {amount}; yuvarlaklık birimi {cfg.round_unit}; "
-                    f"onay sınırı {cfg.approval_threshold}, alt marj {cfg.threshold_margin}.",
+                    f"Tutar {amount} {currency}; yuvarlaklık birimi {unit}; "
+                    f"onay sınırı {threshold}, alt marj {cfg.threshold_margin}.",
                     [i],
+                    currency=currency,
+                    approval_threshold=str(threshold),
+                    round_unit=str(unit),
                     round_amount=round_amount,
                     below_threshold=near,
                 )
+        if missing_limits:
+            warnings.append(f"Tutar kuralı için sınır/birim tanımsız: {sorted(missing_limits)}.")
 
     if ready("non_working_day", cfg.posting_date_field):
-        holidays = json.loads(files(__package__).joinpath("holidays_tr.json").read_text())
+        holiday_file = (
+            Path(cfg.holidays_path)
+            if cfg.holidays_path
+            else files(__package__).joinpath("holidays_tr.json")
+        )
+        try:
+            holidays = json.loads(holiday_file.read_text(encoding="utf-8"))
+            for field in (
+                "religious_years",
+                "annual_full_days",
+                "annual_half_days",
+                "full_days",
+                "half_days",
+            ):
+                if not isinstance(holidays[field], list):
+                    raise ValueError("Tatil listesi geçersiz.")
+        except (OSError, ValueError, KeyError, TypeError) as exc:
+            raise ValueError("Tatil yapılandırması okunamadı veya geçersiz.") from exc
         uncovered = sorted(
             {r["date"].year for r in rows if r["date"]} - set(holidays["religious_years"])
         )
@@ -218,22 +255,25 @@ def run_rules(df, mapping: dict[str, str], config=None) -> AnalysisResult:
 
     if ready("segregation_of_duties", "created_by", "approver"):
         for i, r in enumerate(rows):
-            if r.get("created_by") and r["created_by"] == r.get("approver"):
+            if same_identity(r.get("created_by"), r.get("approver")):
                 add(
                     "segregation_of_duties",
                     "Görevler ayrılığı ihlali",
                     "high",
                     "Kaydı oluşturan kişi ile onaylayan kişi aynı.",
                     [i],
-                    user=r["created_by"],
+                    created_by=str(df.iloc[i][mapping["created_by"]]),
+                    approver=str(df.iloc[i][mapping["approver"]]),
                 )
 
     if ready("vendor_outlier", vendor, "amount"):
         for key, positions in groups("vendor", "currency_key").items():
-            positions = [i for i in positions if rows[i]["money"] is not None]
+            positions = [
+                i for i in positions if rows[i]["money"] is not None and rows[i]["money"] > 0
+            ]
             if len(positions) < cfg.outlier_min_samples:
                 continue
-            amounts = pd.Series([float(rows[i]["money"]) for i in positions])
+            amounts = pd.Series([math.log10(rows[i]["money"]) for i in positions])
             if not all(math.isfinite(v) for v in amounts):
                 warnings.append(f"{key}: istatistik hesabı için tutar aralığı çok büyük.")
                 continue
@@ -241,15 +281,23 @@ def run_rules(df, mapping: dict[str, str], config=None) -> AnalysisResult:
             mad = (amounts - median).abs().median()
             q1, q3 = amounts.quantile([0.25, 0.75])
             lower, upper = q1 - cfg.iqr_multiplier * (q3 - q1), q3 + cfg.iqr_multiplier * (q3 - q1)
+            median_amount = (
+                sorted(rows[i]["money"] for i in positions)[len(positions) // 2]
+                if mad == 0 and q3 == q1
+                else None
+            )
             for i, value in zip(positions, amounts, strict=True):
                 score = 0.67448975 * abs(value - median) / mad if mad else None
                 outlier = score > cfg.robust_z_threshold if mad else value < lower or value > upper
+                if median_amount is not None:
+                    deviation = abs(Fraction(rows[i]["money"]) / Fraction(median_amount) - 1)
+                    outlier = outlier and deviation > Fraction(str(cfg.outlier_relative_tolerance))
                 if outlier:
                     add(
                         "vendor_outlier",
                         "Tedarikçi bazında aykırı tutar",
                         "medium",
-                        f"Tutar {value}; medyan {median}, MAD {mad}. "
+                        f"Tutar {rows[i]['money']}; log10 medyan {median}, MAD {mad}. "
                         + (
                             f"Sağlam z skoru {score:.4f} > {cfg.robust_z_threshold}."
                             if mad
@@ -257,6 +305,8 @@ def run_rules(df, mapping: dict[str, str], config=None) -> AnalysisResult:
                         ),
                         [i],
                         method="robust_z" if mad else "iqr",
+                        scale="log10",
+                        relative_tolerance=cfg.outlier_relative_tolerance,
                         median=median,
                         mad=mad,
                         robust_z=score,
@@ -289,9 +339,15 @@ def run_rules(df, mapping: dict[str, str], config=None) -> AnalysisResult:
                     expected_proportions={str(d): v for d, v in expected.items()},
                 )
 
+    if omitted:
+        warnings.append(
+            f"Bulgu sınırı ({cfg.max_findings}) aşıldı; {sum(omitted.values())} bulgu döndürülmedi."
+        )
     return AnalysisResult(
         findings=findings,
         summary=Summary(
+            truncated=bool(omitted),
+            omitted_by_rule=dict(omitted),
             total_rows=n,
             total_findings=len(findings),
             affected_rows=len({i for f in findings for i in f.row_indices}),
