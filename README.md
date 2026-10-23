@@ -249,3 +249,12 @@ persistence integration test; CI supplies a pgvector/Postgres service and runs i
 Tiny UTF-8, Windows-1254, comma CSV and multi-sheet XLSX fixtures are committed in
 `services/api/tests/fixtures`. Web checks: `cd apps/web && npm ci && npm run lint &&
 npm run typecheck && npm run build`.
+
+
+Parsing is shared in `app/tabular/parsing.py`. Ingestion chooses one numeric locale
+per column (Turkish grouping takes precedence for ambiguous `12.500`) and exposes
+ambiguity warnings in the profile/UI. `prepare_table` provides Decimal/native-date
+columns for analytics without reparsing source strings. Numeric distinct counts
+retain Decimal precision; previews retain source values. Delimiter-only records
+count as null rows. Parsing is limited to 2,000,000 cells (including headers), so
+small but extremely wide/sparse Excel files cannot expand without a bound.

@@ -42,7 +42,7 @@ type Preview = {
   columns: string[];
   rows: Record<string, string | number | boolean | null>[];
 };
-type Detail = { id: string; profile: { columns: Column[] }; preview: Preview };
+type Detail = { id: string; profile: { columns: Column[]; warnings?: string[] }; preview: Preview };
 const api = (
   process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000"
 ).replace(/\/$/, "");
@@ -417,6 +417,12 @@ export function DatasetsWorkspace() {
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="min-w-0">
+              {detail.profile.warnings?.length ? (
+                <ul role="status" className="mb-4 list-disc space-y-1 pl-5 text-sm text-muted-foreground">
+                  {detail.profile.warnings.map((warning, index) => <li key={index}>{warning}</li>)}
+                </ul>
+              ) : null}
+
                   <Table>
                     <TableCaption>Sütun türleri ve veri kalitesi</TableCaption>
                     <TableHeader>

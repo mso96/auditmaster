@@ -3,7 +3,6 @@
 import csv
 import io
 import math
-import re
 from collections import Counter
 from datetime import date, datetime
 from pathlib import Path
@@ -12,11 +11,14 @@ from zipfile import BadZipFile, ZipFile
 import pandas as pd
 from openpyxl import load_workbook
 
+from app.tabular.parsing import parse_amounts, parse_dates
+
 MAX_BYTES = 50 * 1024 * 1024
+MAX_CELLS = 2_000_000
 
 
 def scalar(value):
-    if value is None or (isinstance(value, float) and math.isnan(value)):
+    if value is None or pd.isna(value):
         return None
     if isinstance(value, (date, datetime)):
         return value.isoformat()
@@ -44,7 +46,7 @@ def read_table(path: Path, suffix: str, sheet: str | None = None):
             # One-column CSVs are valid; prefer the most common header separator.
             header = text.splitlines()[0] if text else ""
             delimiter = max(";\t,|", key=header.count)
-        records = list(csv.reader(io.StringIO(text), delimiter=delimiter, strict=True))
+        records = bounded_rows(csv.reader(io.StringIO(text), delimiter=delimiter, strict=True))
     else:
         try:
             with ZipFile(path) as archive:
@@ -57,10 +59,16 @@ def read_table(path: Path, suffix: str, sheet: str | None = None):
             selected = sheet or workbook.sheetnames[0]
             if selected not in workbook.sheetnames:
                 raise ValueError("Çalışma sayfası bulunamadı.")
-            records = list(workbook[selected].iter_rows(values_only=True))
+            worksheet = workbook[selected]
+            if (worksheet.max_row or 0) * (worksheet.max_column or 0) > MAX_CELLS:
+                raise ValueError("Çalışma sayfası 2.000.000 hücre sınırını aşıyor.")
+            records = bounded_rows(worksheet.iter_rows(values_only=True))
+            while records and all(scalar(v) is None for v in records[-1]):
+                records.pop()
         finally:
             workbook.close()
-    records = [list(row) for row in records if any(scalar(v) is not None for v in row)]
+    # Empty physical CSV lines have no fields. Delimiter-only rows are real null records.
+    records = [list(row) for row in records if len(row)]
     if not records:
         raise ValueError("Dosya boş; sütun başlıkları bulunamadı.")
     headers = [str(v).strip() if v is not None else "" for v in records[0]]
@@ -72,37 +80,14 @@ def read_table(path: Path, suffix: str, sheet: str | None = None):
     return frame, selected
 
 
-def number(value):
-    if isinstance(value, bool):
-        raise ValueError
-    if isinstance(value, (int, float)):
-        result = float(value)
-    else:
-        text = str(value).strip()
-        if re.fullmatch(r"[+-]?\d{1,3}(?:\.\d{3})+(?:,\d+)?", text):
-            text = text.replace(".", "").replace(",", ".")
-        elif re.fullmatch(r"[+-]?\d+,\d+", text):
-            text = text.replace(",", ".")
-        elif not re.fullmatch(r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?", text):
-            raise ValueError
-        result = float(text)
-    if not math.isfinite(result):
-        raise ValueError
-    return result
-
-
-def day(value):
-    if isinstance(value, datetime):
-        return value.date().isoformat()
-    if isinstance(value, date):
-        return value.isoformat()
-    text = str(value)
-    for pattern in ("%d.%m.%Y", "%Y-%m-%d"):
-        try:
-            return datetime.strptime(text, pattern).date().isoformat()
-        except ValueError:
-            pass
-    raise ValueError
+def bounded_rows(source):
+    records, cells = [], 0
+    for row in source:
+        cells += len(row)
+        if cells > MAX_CELLS:
+            raise ValueError("Dosya 2.000.000 hücre sınırını aşıyor.")
+        records.append(row)
+    return records
 
 
 def boolean(value):
@@ -114,35 +99,75 @@ def boolean(value):
     raise ValueError
 
 
-def profile(frame: pd.DataFrame):
-    columns = []
+def json_number(value):
+    if value is None:
+        return None
+    number = float(value)
+    return number if math.isfinite(number) else str(value)
+
+
+def prepare_table(frame: pd.DataFrame):
+    """Return authoritative typed columns and a profile; preview stays source-original."""
+    columns, warnings = [], []
+    typed = frame.copy()
     for name in frame.columns:
         raw = frame[name].tolist()
-        values = [v for v in raw if scalar(v) is not None]
+        present = [i for i, value in enumerate(raw) if scalar(value) is not None]
+        values = [raw[i] for i in present]
         kind, converted = "text", [str(scalar(v)) for v in values]
         if values:
-            for candidate, parser in [("boolean", boolean), ("number", number), ("date", day)]:
-                try:
-                    converted = [parser(v) for v in values]
-                    kind = candidate
-                    break
-                except (ValueError, TypeError, OverflowError):
-                    continue
+            try:
+                converted = [boolean(v) for v in values]
+                kind = "boolean"
+            except (ValueError, TypeError):
+                number_warnings = []
+                amounts = parse_amounts(
+                    raw, decimal_separator="auto", field=name, warnings=number_warnings
+                )
+                if all(amounts[i] is not None for i in present):
+                    kind, converted = "number", [amounts[i] for i in present]
+                    warnings.extend(number_warnings)
+                else:
+                    date_warnings = []
+                    days = parse_dates(frame[name], field=name, warnings=date_warnings)
+                    if all(days[i] is not None for i in present):
+                        kind, converted = "date", [days[i] for i in present]
+                        warnings.extend(date_warnings)
+        if kind != "text":
+            normalized = [None] * len(raw)
+            for i, value in zip(present, converted, strict=True):
+                normalized[i] = value
+            typed[name] = pd.Series(normalized, index=frame.index, dtype=object)
         counts = Counter(converted)
+        minimum = min(converted) if converted and kind in ("number", "date") else None
+        maximum = max(converted) if converted and kind in ("number", "date") else None
         columns.append(
             {
                 "name": name,
                 "type": kind,
                 "null_count": len(raw) - len(values),
                 "distinct_count": len(counts),
-                "min": min(converted) if converted and kind in ("number", "date") else None,
-                "max": max(converted) if converted and kind in ("number", "date") else None,
+                # JSON clients expect numeric min/max; distinct counts and typed handoff
+                # are computed with exact Decimal values, never rounded binary floats.
+                "min": float(minimum)
+                if kind == "number" and minimum is not None
+                else scalar(minimum),
+                "max": float(maximum)
+                if kind == "number" and maximum is not None
+                else scalar(maximum),
                 "top_values": [{"value": v, "count": c} for v, c in counts.most_common(5)]
                 if kind == "text"
                 else [],
             }
         )
-    return {"row_count": len(frame), "columns": columns}
+    result = {"row_count": len(frame), "columns": columns}
+    if warnings:
+        result["warnings"] = warnings
+    return typed, result
+
+
+def profile(frame: pd.DataFrame):
+    return prepare_table(frame)[1]
 
 
 def preview(frame: pd.DataFrame):

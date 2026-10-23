@@ -251,3 +251,55 @@ def test_database_insert_failure_cleans_files(client, tmp_path, monkeypatch):
         client.post("/datasets", files={"file": ("data.csv", b"a\n1")})
     assert list(tmp_path.iterdir()) == []
     assert client.get("/datasets").json() == []
+
+
+def test_delimiter_only_rows_are_not_discarded(client):
+    response = client.post("/datasets", files={"file": ("nulls.csv", b"a;b\n1;2\n;\n3;4\n")})
+    assert response.status_code == 201
+    assert response.json()["row_count"] == 3
+    result = client.get(f"/datasets/{response.json()['id']}/profile").json()
+    assert [c["null_count"] for c in result["columns"]] == [1, 1]
+
+
+def test_exact_numeric_distinct_and_typed_handoff():
+    from decimal import Decimal
+
+    from app.datasets.profiling import prepare_table
+
+    frame = pd.DataFrame(
+        {"amount": ["9007199254740992", "9007199254740993"], "date": ["07.06.2026", "13.06.2026"]}
+    )
+    typed, result = prepare_table(frame)
+    assert result["columns"][0]["distinct_count"] == 2
+    assert typed["amount"].tolist() == [Decimal("9007199254740992"), Decimal("9007199254740993")]
+    assert typed["date"].iloc[0].isoformat() == "2026-06-07"
+    assert any("belirsiz" in warning for warning in result["warnings"])
+
+
+def test_shared_parsing_turkish_amounts_and_mixed_timezones():
+    from app.datasets.profiling import prepare_table
+
+    frame = pd.DataFrame(
+        {
+            "amount": ["1.234,56", "12.500"],
+            "date": ["2026-06-07T00:30:00+03:00", "2026-06-07T23:30:00-04:00"],
+        }
+    )
+    typed, result = prepare_table(frame)
+    assert result["columns"][0]["min"] == 1234.56
+    assert result["columns"][0]["max"] == 12500
+    assert [v.isoformat() for v in typed["date"]] == ["2026-06-07", "2026-06-07"]
+
+
+def test_cell_budget_rejects_and_cleans(client, monkeypatch, tmp_path):
+    monkeypatch.setattr("app.datasets.profiling.MAX_CELLS", 3)
+    response = client.post("/datasets", files={"file": ("wide.csv", b"a;b\n1;2\n")})
+    assert response.status_code == 422
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_nonfinite_json_bounds_are_safe(client):
+    response = client.post("/datasets", files={"file": ("huge.csv", b"amount\n9e308\n")})
+    assert response.status_code == 201
+    result = client.get(f"/datasets/{response.json()['id']}/profile").json()
+    assert result["columns"][0]["max"] == "9E+308"
