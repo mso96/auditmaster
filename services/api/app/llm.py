@@ -62,6 +62,10 @@ class LLMClient:
         json_mode: bool = False,
     ) -> str:
         if self._settings.fake_models and self._client is None:
+            if prompt.startswith("TEST_PLAN_REQUEST\n"):
+                from app.testplans.generator import fake_complete as fake_test_plan
+
+                return fake_test_plan(prompt)
             from app.rcmgen import fake_complete
 
             return fake_complete(prompt)

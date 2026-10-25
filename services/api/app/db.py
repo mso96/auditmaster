@@ -65,6 +65,16 @@ _STATEMENTS = (
         updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
     )
     """,
+    """
+    CREATE TABLE IF NOT EXISTS test_plans (
+        audit_id UUID PRIMARY KEY REFERENCES audits (id) ON DELETE CASCADE,
+        rcm_id UUID NOT NULL REFERENCES rcms (id) ON DELETE CASCADE,
+        rcm_updated_at TIMESTAMPTZ NOT NULL,
+        revision INTEGER NOT NULL,
+        payload JSONB NOT NULL,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+    """,
 )
 
 
@@ -115,7 +125,7 @@ def reset_schema_cache() -> None:
 
 def truncate_data(database_url: str) -> None:
     with connect(database_url) as conn:
-        conn.execute("TRUNCATE TABLE rcms, audits, chunks, documents")
+        conn.execute("TRUNCATE TABLE test_plans, rcms, audits, chunks, documents")
 
 
 def vector_literal(values: list[float]) -> str:

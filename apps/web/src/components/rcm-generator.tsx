@@ -282,6 +282,12 @@ export function RcmGenerator() {
                   Excel indir
                 </a>
               ) : null}
+              {auditId && !dirty ? (
+                <Link href={`/test-planlari?audit=${auditId}`}
+                  className={buttonVariants({ variant: "outline" })}>
+                  Test planı oluştur
+                </Link>
+              ) : null}
               {dirty ? (
                 <span className="text-xs text-muted-foreground">
                   Kaydedilmemiş değişiklik var.

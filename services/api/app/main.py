@@ -9,6 +9,7 @@ from app.config import get_settings
 from app.datasets.router import router as datasets_router
 from app.db import check_database
 from app.llm import LLMClient
+from app.testplans.router import router as test_plans_router
 
 logger = logging.getLogger(__name__)
 
@@ -16,6 +17,7 @@ logger = logging.getLogger(__name__)
 def create_app() -> FastAPI:
     settings = get_settings()
     app = FastAPI(title="AuditMaster API", version="0.1.0")
+    app.include_router(test_plans_router)
     app.include_router(datasets_router)
     app.include_router(analysis_router)
     app.add_middleware(AnalysisBodyLimit)
@@ -23,7 +25,7 @@ def create_app() -> FastAPI:
         CORSMiddleware,
         allow_origins=settings.cors_origin_list,
         allow_credentials=True,
-        allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+        allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
         allow_headers=["*"],
     )
     from app.routes import router

@@ -45,7 +45,7 @@ export const navItems: NavItem[] = [
     href: "/test-planlari",
     icon: ListChecks,
     description:
-      "Her risk ve kontrol için hangi verinin gerektiği ve izlenecek adımlar öneri olarak sunulacak. Uygulama kararı denetçidedir.",
+      "Kabul edilmiş kontroller için kaynaklı test adımları önerilir. Adımları inceleyin, düzenleyin ve kararlarınızı kaydedin. Hiçbir test otomatik çalıştırılmaz.",
     points: [
       "Risk ve kontrole bağlı öneriler",
       "Gerekli veri ve uygulama adımları",
