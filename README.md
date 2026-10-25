@@ -258,3 +258,56 @@ columns for analytics without reparsing source strings. Numeric distinct counts
 retain Decimal precision; previews retain source values. Delimiter-only records
 count as null rows. Parsing is limited to 2,000,000 cells (including headers), so
 small but extremely wide/sparse Excel files cannot expand without a bound.
+
+## Test Planları: kabul edilmiş RCM'den öneriler
+
+RCM Oluşturucu'da kontrol içeren satırları **Kabul** durumuna getirip denetimi
+kaydedin. **Test planı oluştur** bağlantısını veya Test Planları ekranındaki
+denetim seçimini kullanın. Bekliyor, Düzenlendi ve Reddedildi durumundaki RCM
+satırları öneri üretimine dahil edilmez; düzenlenmiş bir RCM satırı ayrıca kabul
+edilmelidir.
+
+**Test öner ve taslağı kaydet**, her kabul edilmiş kontrol için mevcut hibrit
+arama ile kütüphaneden pasajlar getirir ve 1–6 ayrı adım önerir. Her adım test
+amacı, yöntem (inceleme, gözlem, yeniden uygulama, analitik), prosedür, gerekçeli
+örneklem önerisi, istenecek kanıtlar ve isteğe bağlı analiz kuralı içerir.
+Örneklem sayısı standart veya istatistiksel güvence değildir; denetçi evren ve
+riske göre belirler. Analiz kuralı yalnızca ilişkilendirmedir. **Hiçbir sorgu,
+test veya analiz otomatik çalıştırılmaz.**
+
+Her adım ayrı ayrı kabul edilebilir, düzenlenebilir, reddedilebilir veya beklemeye
+alınabilir. Kararlar **Kararları kaydet** ile denetime kaydedilir. Excel çıktısı
+tüm adımları, kararları, kaynak durumunu ve belge/sayfa/bölüm/alıntı bilgisini
+içerir; kullanıcı/model metni Excel formülü olarak çalıştırılmaz.
+
+Kaynaklar yalnızca o kontrol için getirilen pasajlara ait doğrulanmış alıntılardan
+oluşur; alıntısız öneriler **Kaynaksız** gösterilir. Bu kontrol alıntının varlığını
+doğrular, anlamsal doğruluğunu garanti etmez. Denetçi içeriği değiştirdiğinde
+kaynaklı etiketi kaldırılır; karar değişikliği tek başına kaynakları silmez.
+Silinmiş kütüphane belgeleri okuma, kaydetme ve dışa aktarma sırasında yeniden
+kontrol edilir. İstemci kendi kaynak veya kontrol kimliğini kayda ekleyemez.
+
+API:
+
+- GET /audits/{id}/test-plan: kayıtlı plan veya null.
+- POST /audits/{id}/test-plan/generate: {expected_revision: 0} ilk taslağı
+  üretir ve kaydeder. Yeniden üretimde mevcut revizyon gönderilir ve eski planın
+  yerini yeni bekleyen öneriler alır; UI önce onay ister.
+- PUT /audits/{id}/test-plan: {expected_revision, steps} ile mevcut adımların
+  içeriğini ve kararlarını kaydeder. Adım silmek yerine ret kararı kullanılır.
+- GET /audits/{id}/test-plan/export: kaydedilmiş planın XLSX çıktısı.
+
+RCM plan üretildikten sonra değiştirilirse eski plan okunabilir, ancak kaydetme
+ve dışa aktarma 409 döndürür; güncel kontrollerden yeniden öneri üretmek gerekir.
+Revizyon kontrolü ve veritabanı kilitleri eşzamanlı düzenleme/yeniden üretimde
+sessiz üzerine yazmayı önler. Başarısız üretim mevcut planı değiştirmez.
+test_plans tablosu mevcut Postgres kurulumunda idempotent olarak oluşturulur;
+veritabanını sıfırlamak gerekmez.
+
+Mevcut OpenAI uyumlu istemci kullanılır. FAKE_MODELS=true ile API anahtarı,
+model sunucusu veya ağ üzerinden reranker çağrısı gerekmez; deterministik örnek
+adımlar üretilir. FAKE_MODELS=false mevcut model ve embedding ayarlarını kullanır.
+
+Testler: pytest üretim şeması/onarımı, geçersiz atıflar, kabul edilmiş kontrol
+filtresi, gerçek Postgres ile kayıt/yeniden okuma, eşzamanlı değişiklik, RCM
+güncelliği, Excel metin güvenliği ve kaynak silinmesi akışlarını kapsar.

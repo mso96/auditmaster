@@ -96,6 +96,10 @@ export function AuditList() {
                     >
                       RCM&apos;yi aç
                     </Link>
+                    <Link href={`/test-planlari?audit=${audit.id}`}
+                      className="ml-3 text-sm underline">
+                      Test planı
+                    </Link>
                   </TableCell>
                 </TableRow>
               ))
